@@ -1,0 +1,12 @@
+/target
+/data
+node_modules/
+*.db
+*.db-*
+*.sqlite
+
+task_plan.md
+findings.md
+progress.md
+*.local.md
+.env
