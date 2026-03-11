@@ -211,8 +211,8 @@ CREATE TABLE crawl_progress (
 
 2. 权益源与账户筛选
    - 权益源优先级：
-     1) `getLatestPositiveSnapshotAnchorsByGroup(group)`（`balance+anchor_time`）
-     2) fallback `getLatestPositiveAccountBalancesByGroup(group)`（锚点时间设为 `trade_start`）
+     1) `getClosestPositiveSnapshotAnchorsByGroup(group, tradeStartMs)`（取离交易窗口起点最近的正值快照，缩短重建路径）
+     2) fallback `getLatestPositiveAccountBalancesByGroup(group)`（锚点时间取 `discovered_at` 对应的 UTC 日起毫秒）
    - 过滤：仅保留 `balance >= min_equity` 且有限数值账户
 
 3. 资金分配（账户等权）
@@ -224,6 +224,7 @@ CREATE TABLE crawl_progress (
    - 开仓权益重建：
      - 事件源：`cash_flows.amount` + `trades.pnl(close_time)`，按时间合并
      - 现金流去重策略：API 覆盖区间（按 min/max 事件时间界定）内用真值，区间外回退推断流；无 API 事件时全用推断流
+   - 注意：API 真值现金流不含未实现 PnL 变化，持仓波动大时权益重建会漂移（推断流因含 equity_delta 隐式补偿，无此问题）
      - 若锚点在未来：`equity_at_open = anchor_equity - Σ(delta in (open_time, anchor_time])`
      - 若锚点在过去：`equity_at_open = anchor_equity + Σ(delta in (anchor_time, open_time))`
    - 原单名义：`original_notional = entry_price * size`

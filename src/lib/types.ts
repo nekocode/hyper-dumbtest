@@ -175,6 +175,8 @@ export interface AddressDiscoveryStartRow {
 export interface AddressBalanceRow {
   address: string;
   account_balance: number;
+  // why: fallback 锚点需还原真实观测时间，快照来源无此字段故 optional
+  discovered_at?: string;
 }
 
 export interface AddressEquityAnchorRow {

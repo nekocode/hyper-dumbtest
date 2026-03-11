@@ -13,7 +13,7 @@ import {
   getDistinctAddressesByGroup,
   getLatestAccountSnapshot,
   getLatestPositiveAccountBalancesByGroup,
-  getLatestPositiveSnapshotAnchorsByGroup,
+  getClosestPositiveSnapshotAnchorsByGroup,
   getLatestPositiveSnapshotBalancesByGroup,
   getRealizedPnlEventsForAddressInRange,
   getTradesForAddressInRange,
@@ -283,10 +283,12 @@ describe("db", () => {
         {
           address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           account_balance: 1200,
+          discovered_at: "2026-03-02",
         },
         {
           address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           account_balance: 800,
+          discovered_at: "2026-03-03",
         },
       ]);
     });
@@ -331,17 +333,39 @@ describe("db", () => {
       expect(rows).toEqual([{ address: a1, account_balance: 120 }]);
     });
 
-    it("should return latest positive snapshot anchors with time", () => {
+    it("should return closest positive snapshot anchor to reference time", () => {
       const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       insertAddresses(db, [makeAddress(address, "g1")]);
       insertAccountSnapshots(db, [
         makeSnapshot(address, 1000, 80),
-        makeSnapshot(address, 2000, 120),
+        makeSnapshot(address, 3000, 120),
       ]);
 
-      const rows = getLatestPositiveSnapshotAnchorsByGroup(db, "g1");
+      // 离 2500 最近的是 3000
+      const rows = getClosestPositiveSnapshotAnchorsByGroup(db, "g1", 2500);
       expect(rows).toEqual([
-        { address, account_balance: 120, anchor_time: 2000 },
+        { address, account_balance: 120, anchor_time: 3000 },
+      ]);
+
+      // 离 1200 最近的是 1000
+      const rows2 = getClosestPositiveSnapshotAnchorsByGroup(db, "g1", 1200);
+      expect(rows2).toEqual([
+        { address, account_balance: 80, anchor_time: 1000 },
+      ]);
+    });
+
+    it("should prefer earlier snapshot when equidistant to reference time", () => {
+      const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      insertAddresses(db, [makeAddress(address, "g1")]);
+      insertAccountSnapshots(db, [
+        makeSnapshot(address, 1000, 80),
+        makeSnapshot(address, 3000, 120),
+      ]);
+
+      // 等距时取较早快照，避免前视偏差
+      const rows = getClosestPositiveSnapshotAnchorsByGroup(db, "g1", 2000);
+      expect(rows).toEqual([
+        { address, account_balance: 80, anchor_time: 1000 },
       ]);
     });
 

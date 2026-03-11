@@ -175,7 +175,7 @@ export function getLatestPositiveAccountBalancesByGroup(
 ): AddressBalanceRow[] {
   return db
     .prepare(
-      `SELECT a.address, a.account_balance
+      `SELECT a.address, a.account_balance, a.discovered_at
        FROM addresses a
        WHERE a.group_name = ?
          AND a.account_balance IS NOT NULL
@@ -360,9 +360,12 @@ export function getLatestPositiveSnapshotBalancesByGroup(
     .all(groupName) as AddressBalanceRow[];
 }
 
-export function getLatestPositiveSnapshotAnchorsByGroup(
+// why: 取离 referenceTime 最近的正值快照，缩短权益重建路径、减少累积误差
+//       等距时优先取较早快照，避免前视偏差
+export function getClosestPositiveSnapshotAnchorsByGroup(
   db: Database.Database,
   groupName: string,
+  referenceTime: number,
 ): AddressEquityAnchorRow[] {
   return db
     .prepare(
@@ -377,14 +380,16 @@ export function getLatestPositiveSnapshotAnchorsByGroup(
              AND a.address = s.address
          )
          AND s.snapshot_time = (
-           SELECT MAX(s2.snapshot_time)
+           SELECT s2.snapshot_time
            FROM account_snapshots s2
            WHERE s2.address = s.address
              AND s2.total_value IS NOT NULL
              AND s2.total_value > 0
+           ORDER BY ABS(s2.snapshot_time - ?) ASC, s2.snapshot_time ASC
+           LIMIT 1
          )`,
     )
-    .all(groupName) as AddressEquityAnchorRow[];
+    .all(groupName, referenceTime) as AddressEquityAnchorRow[];
 }
 
 // ===== Cash Flows =====

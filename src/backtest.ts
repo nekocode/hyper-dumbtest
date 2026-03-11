@@ -4,7 +4,7 @@ import Table from "cli-table3";
 import {
   getCashFlowEventsForAddressInRange,
   getAddressDiscoveryStartsByGroup,
-  getLatestPositiveSnapshotAnchorsByGroup,
+  getClosestPositiveSnapshotAnchorsByGroup,
   getLatestPositiveAccountBalancesByGroup,
   getRealizedPnlEventsForAddressInRange,
   getTradesForAddressInRange,
@@ -876,7 +876,7 @@ function generateReport(
   console.log("-".repeat(W));
 
   // 数据质量
-  console.log(kvTable([
+  const dataQualityRows: [string, string][] = [
     ["权益锚点", `快照=${context.snapshotAnchorCount}, 导入=${context.importedAnchorCount}`],
     [
       "现金流",
@@ -884,7 +884,15 @@ function generateReport(
     ],
     ["比率截断", `${clippedTrades}/${trades.length} (${formatPercent(clippedTrades / trades.length)})`],
     ["风控事件", `爆仓 ${diagnostics.liquidatedAddresses} 地址, 封顶 ${diagnostics.lossCappedTrades} 笔`],
-  ]));
+  ];
+  // why: API 真值现金流不含未实现 PnL 变化，持仓波动大时权益重建会漂移
+  if (diagnostics.addressesWithApiCashFlows > 0) {
+    dataQualityRows.push([
+      "注意",
+      `${diagnostics.addressesWithApiCashFlows} 个 API 现金流地址不含未实现 PnL 变化，权益重建精度受持仓波动影响`,
+    ]);
+  }
+  console.log(kvTable(dataQualityRows));
 
   console.log("-".repeat(W));
 
@@ -1009,9 +1017,10 @@ function main() {
       );
 
     const addresses = rows.map((row) => row.address);
-    const snapshotAnchors = getLatestPositiveSnapshotAnchorsByGroup(
+    const snapshotAnchors = getClosestPositiveSnapshotAnchorsByGroup(
       db,
       groupName,
+      tradeStartMs,
     );
     const importedBalances = getLatestPositiveAccountBalancesByGroup(
       db,
@@ -1021,9 +1030,18 @@ function main() {
     for (const anchor of snapshotAnchors) {
       snapshotAnchorByAddress.set(anchor.address, anchor);
     }
-    const importedBalanceByAddress = new Map<string, number>();
+    // why: 需同时保留 discovered_at 以还原正确的锚点时间
+    const importedBalanceByAddress = new Map<
+      string,
+      { balance: number; discoveredAt: string }
+    >();
     for (const row of importedBalances) {
-      importedBalanceByAddress.set(row.address, row.account_balance);
+      if (row.discovered_at) {
+        importedBalanceByAddress.set(row.address, {
+          balance: row.account_balance,
+          discoveredAt: row.discovered_at,
+        });
+      }
     }
 
     const balanceAnchors: AddressEquityAnchorRow[] = [];
@@ -1035,14 +1053,20 @@ function main() {
         continue;
       }
 
-      const importedBalance = importedBalanceByAddress.get(address);
-      if (importedBalance === undefined) {
+      const imported = importedBalanceByAddress.get(address);
+      if (!imported) {
         continue;
       }
+      // why: 导入余额的真实观测时间是 discovered_at，非 tradeStartMs
+      //       错配会导致权益重建方向/区间全错，仓位比例失真
+      const anchorTime = parseDateToUtcStartMs(
+        imported.discoveredAt,
+        "discovered_at",
+      );
       balanceAnchors.push({
         address,
-        account_balance: importedBalance,
-        anchor_time: tradeStartMs,
+        account_balance: imported.balance,
+        anchor_time: anchorTime,
       });
       importedFallbackCount++;
     }
